@@ -46,6 +46,12 @@
                         <p class="font-medium">[[ deviceStatus.last_heartbeat ]]</p>
                     </div>
                 </div>
+                <div v-if="deviceStatus.registered" class="mt-4">
+                    <button @click="deregisterDevice" 
+                            class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-400">
+                        Deregister Device
+                    </button>
+                </div>
             </div>
 
             <!-- Registration Form -->
@@ -207,6 +213,11 @@
                     <p v-if="error.details" class="text-sm mt-1">[[ error.details ]]</p>
                 </div>
             </div>
+
+            <div class="device-list">
+                <h3>Registered Devices</h3>
+                <div id="devices"></div>
+            </div>
         </div>
     </div>
 
@@ -218,19 +229,22 @@
                 deviceStatus: {{ device_status|tojson }},
                 form: {
                     device_id: '',
-                    metadata: '{\n  "url": "http://onprem-connector:8002",\n  "description": "On-premises device"\n}'
+                    metadata: JSON.stringify({
+                        url: 'http://onprem-connector:8002',
+                        description: 'Test Device'
+                    }, null, 2)
                 },
                 publishForm: {
                     dataType: 'temperature',
-                    temperature: 20.0,
-                    customData: '{\n  "key": "value"\n}'
+                    temperature: 20,
+                    customData: ''
                 },
+                publishHistory: [],
                 apiForm: {
                     endpoint: '/api/status',
                     customEndpoint: '',
-                    payload: '{\n  "include_diagnostics": true\n}'
+                    payload: '{}'
                 },
-                publishHistory: [],
                 apiHistory: [],
                 errors: [],
                 charts: {
@@ -245,17 +259,28 @@
                         formData.append('device_id', this.form.device_id);
                         formData.append('metadata', this.form.metadata);
 
-                        const response = await axios.post('/register', formData);
-                        if (response.data.status === 'success') {
-                            this.deviceStatus = {
-                                ...this.deviceStatus,
-                                ...response.data.data,
-                                registered: true
-                            };
-                            alert('Device registered successfully!');
+                        const response = await fetch('/register', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.detail || 'Registration failed');
                         }
+
+                        const result = await response.json();
+                        this.deviceStatus = {
+                            ...this.deviceStatus,
+                            registered: true,
+                            device_id: this.form.device_id,
+                            token: result.data.token,
+                            registration_info: result.data
+                        };
+                        this.showSuccess('Device registered successfully');
                     } catch (error) {
-                        alert('Error registering device: ' + error.response?.data?.detail || error.message);
+                        console.error('Registration error:', error);
+                        this.showError(error.message || 'Failed to register device');
                     }
                 },
                 async publishData() {
@@ -451,6 +476,39 @@
                             }
                         });
                     }
+                },
+                async deregisterDevice() {
+                    if (!confirm(`Are you sure you want to deregister device ${this.deviceStatus.device_id}?`)) {
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(`/api/deregister/${this.deviceStatus.device_id}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            throw new Error(errorData.detail || 'Failed to deregister device');
+                        }
+
+                        const result = await response.json();
+                        this.deviceStatus = {
+                            registered: false,
+                            connected: false,
+                            device_id: '',
+                            token: null,
+                            last_heartbeat: null,
+                            registration_info: null
+                        };
+                        this.showSuccess('Device deregistered successfully');
+                    } catch (error) {
+                        console.error('Error deregistering device:', error);
+                        this.showError(error.message || 'Failed to deregister device');
+                    }
                 }
             },
             mounted() {
@@ -472,6 +530,103 @@
                 }
             }
         });
+
+        async function loadDevices() {
+            try {
+                const response = await fetch('/api/devices');
+                const devices = await response.json();
+                const devicesDiv = document.getElementById('devices');
+                devicesDiv.innerHTML = '';
+                
+                devices.forEach(device => {
+                    const deviceElement = document.createElement('div');
+                    deviceElement.className = 'device-item';
+                    deviceElement.innerHTML = `
+                        <div class="device-info">
+                            <strong>ID:</strong> ${device.id}<br>
+                            <strong>Status:</strong> ${device.status}<br>
+                            <strong>Connected:</strong> ${device.connected ? 'Yes' : 'No'}<br>
+                            <strong>Last Seen:</strong> ${new Date(device.last_seen).toLocaleString()}
+                        </div>
+                        <div class="device-actions">
+                            <button onclick="deregisterDevice('${device.id}')" class="btn btn-danger">Deregister</button>
+                        </div>
+                    `;
+                    devicesDiv.appendChild(deviceElement);
+                });
+            } catch (error) {
+                console.error('Error loading devices:', error);
+                showError('Failed to load devices');
+            }
+        }
+
+        async function deregisterDevice(deviceId) {
+            if (!confirm(`Are you sure you want to deregister device ${deviceId}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/deregister/${deviceId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to deregister device');
+                }
+
+                const result = await response.json();
+                showSuccess('Device deregistered successfully');
+                loadDevices(); // Refresh the device list
+            } catch (error) {
+                console.error('Error deregistering device:', error);
+                showError('Failed to deregister device');
+            }
+        }
     </script>
+
+    <style>
+        .device-list {
+            margin-top: 2rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .device-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .device-info {
+            flex: 1;
+        }
+
+        .device-actions {
+            margin-left: 1rem;
+        }
+
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+    </style>
 </body>
 </html> 

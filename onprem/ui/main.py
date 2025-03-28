@@ -11,6 +11,7 @@ import asyncio
 from typing import Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+import httpx
 
 # Enhanced logging configuration
 logging.basicConfig(
@@ -357,6 +358,55 @@ async def get_status():
         device_status["connected"] = False
         device_status["last_heartbeat"] = f"Error: {str(e)}"
         return device_status
+
+@app.get("/api/devices")
+async def list_devices():
+    """Get list of all registered devices"""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{REGISTRY_URL}/devices")
+            return response.json()
+    except Exception as e:
+        logger.error(f"Error listing devices: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/deregister/{device_id}")
+async def deregister_device(device_id: str):
+    """Deregister a device from the cloud service"""
+    try:
+        cloud_url = os.getenv("CLOUD_URL", "http://registry:8000")
+        cert_path = os.getenv("CERT_PATH")
+        key_path = os.getenv("KEY_PATH")
+
+        # Prepare SSL context if certificates are available
+        ssl_context = None
+        if cert_path and key_path:
+            ssl_context = aiohttp.TCPConnector(
+                ssl=False
+            )
+
+        async with aiohttp.ClientSession(connector=ssl_context) as session:
+            async with session.post(
+                f"{cloud_url}/deregister/{device_id}",
+                headers={"Authorization": f"Bearer {device_status['token']}"} if device_status['token'] else {}
+            ) as response:
+                if response.status == 200:
+                    # Reset device status
+                    device_status.update({
+                        "registered": False,
+                        "connected": False,
+                        "device_id": None,
+                        "token": None,
+                        "last_heartbeat": None,
+                        "registration_info": None
+                    })
+                    return {"status": "success", "message": "Device deregistered successfully"}
+                else:
+                    error_msg = await response.text()
+                    raise HTTPException(status_code=response.status, detail=error_msg)
+    except Exception as e:
+        logger.error(f"Deregistration error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

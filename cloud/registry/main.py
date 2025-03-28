@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional
 import os
 from token_manager import TokenManager
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,15 +56,32 @@ async def verify_token(authorization: str = Header(None)):
 
 @app.post("/register")
 async def register_device(registration: DeviceRegistration):
-    """Register a new device and return its token"""
+    """Register a new device"""
     try:
-        result = token_manager.register_device(
-            registration.device_id,
-            registration.metadata
-        )
+        device_id = registration.device_id
+        result = token_manager.register_device(device_id, registration.metadata)
+        logger.info(f"Device registered successfully: {device_id}")
         return result
     except Exception as e:
         logger.error(f"Error registering device: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/deregister/{device_id}")
+async def deregister_device(device_id: str):
+    """Deregister a device"""
+    try:
+        if not token_manager.revoke_device(device_id):
+            raise HTTPException(status_code=404, detail="Device not found")
+        
+        logger.info(f"Device deregistered successfully: {device_id}")
+        return {
+            "status": "success",
+            "message": f"Device {device_id} deregistered successfully"
+        }
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Error deregistering device: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/device/{device_id}")
@@ -110,33 +127,6 @@ async def cleanup_expired_devices(_: dict = Depends(verify_token)):
     removed_count = token_manager.cleanup_expired_devices()
     return {"removed_devices": removed_count}
 
-@app.post("/device/{device_id}/data")
-async def publish_data(
-    device_id: str,
-    data: Dict[str, Any],
-    device_info: dict = Depends(verify_token)
-):
-    """Publish data for a device"""
-    if device_info["device_id"] != device_id:
-        raise HTTPException(
-            status_code=403,
-            detail="Not authorized to publish data for this device"
-        )
-    
-    try:
-        # Store the data
-        device_data = token_manager.get_device_info(device_id)
-        if not device_data:
-            raise HTTPException(status_code=404, detail="Device not found")
-        
-        # Update last seen timestamp
-        device_data["last_seen"] = datetime.now()
-        
-        return {"status": "success", "data": data}
-    except Exception as e:
-        logger.error(f"Error publishing data: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/devices")
 async def list_devices():
     """Get list of all registered devices"""
@@ -156,11 +146,4 @@ async def list_devices():
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # Load saved state if available
-    state_file = os.getenv("STATE_FILE", "device_registry_state.json")
-    if os.path.exists(state_file):
-        token_manager.load_state(state_file)
-    
-    # Start the server
     uvicorn.run(app, host="0.0.0.0", port=8000) 
