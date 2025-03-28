@@ -170,6 +170,31 @@ curl -X POST http://localhost:8001/forward/device001/api/endpoint \
 - Device Management UI: Port 8080
 - On-Premises Connector: Internal network only
 
+#### local run
+
+docker compose down && docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d --build
+
+Main Services:
+Device UI: http://localhost:8080
+Cloud UI: http://localhost:8003
+Registry: http://localhost:8000
+Reverse Proxy: http://localhost:8001
+On-Prem Connector (internal)
+Monitoring Stack:
+Grafana: http://localhost:3000 (login with admin/admin)
+Prometheus: http://localhost:9090
+Loki: http://localhost:3100 (used internally by Grafana)
+To access the monitoring dashboards:
+Open Grafana at http://localhost:3000
+Log in with:
+Username: admin
+Password: admin
+You'll be prompted to change the password on first login
+The monitoring stack is collecting metrics from all services, and you can:
+View service metrics in Prometheus
+Create custom dashboards in Grafana
+View logs centrally through Loki in Grafana
+
 ## Troubleshooting
 
 1. **Certificate Issues**:
