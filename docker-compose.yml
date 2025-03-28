@@ -1,0 +1,91 @@
+version: '3'
+
+services:
+  # Cloud Components
+  registry:
+    build:
+      context: .
+      dockerfile: cloud/registry/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - JWT_SECRET_KEY=your_jwt_secret_key
+    volumes:
+      - ./certs:/certs
+      - ./data:/data
+    networks:
+      - cloud-net
+
+  reverse-proxy:
+    build:
+      context: .
+      dockerfile: cloud/proxy/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - JWT_SECRET_KEY=your_jwt_secret_key
+    volumes:
+      - ./certs:/certs
+    depends_on:
+      - registry
+    networks:
+      - cloud-net
+
+  cloud-ui:
+    build:
+      context: .
+      dockerfile: cloud/ui/Dockerfile
+    ports:
+      - "8003:8003"
+    environment:
+      - JWT_SECRET_KEY=your_jwt_secret_key
+    depends_on:
+      - registry
+      - reverse-proxy
+    networks:
+      - cloud-net
+
+  # On-Premises Components
+  onprem-connector:
+    build:
+      context: .
+      dockerfile: onprem/connector/Dockerfile
+    environment:
+      - DEVICE_ID=test-device-001
+      - CLOUD_URL=http://reverse-proxy:8001
+      - CERT_PATH=/certs/device.crt
+      - KEY_PATH=/certs/device.key
+    volumes:
+      - ./certs:/certs
+      - ./data:/data
+    networks:
+      - cloud-net
+      - onprem-net
+
+  # UI Component
+  device-ui:
+    build:
+      context: .
+      dockerfile: onprem/ui/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - DEVICE_ID=${DEVICE_ID:-device001}
+      - CLOUD_URL=http://registry:8000
+      - PROXY_URL=http://reverse-proxy:8001
+      - CERT_PATH=/certs/device.crt
+      - KEY_PATH=/certs/device.key
+    volumes:
+      - ./certs:/certs
+    depends_on:
+      - registry
+      - onprem-connector
+    networks:
+      - cloud-net
+      - onprem-net
+
+networks:
+  cloud-net:
+    driver: bridge
+  onprem-net:
+    driver: bridge 

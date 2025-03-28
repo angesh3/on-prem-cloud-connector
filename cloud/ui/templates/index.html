@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Cloud Dashboard</h1>
+        </header>
+
+        <!-- Registered Devices -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Registered Devices</h2>
+            <div v-if="devices.length === 0" class="text-gray-500">
+                No devices registered
+            </div>
+            <ul v-else class="space-y-4">
+                <li v-for="device in devices" :key="device.id" 
+                    class="border rounded p-4 hover:bg-gray-50 cursor-pointer"
+                    @click="selectDevice(device)">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h3 class="font-medium">${device.id}</h3>
+                            <p class="text-sm text-gray-500">${device.status}</p>
+                        </div>
+                        <span :class="device.connected ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'" 
+                              class="px-2 py-1 rounded-full text-sm">
+                            ${device.connected ? 'Connected' : 'Disconnected'}
+                        </span>
+                    </div>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Data Visualization Section -->
+        <div class="bg-white rounded-lg shadow p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4">Data Visualization</h2>
+            <div class="flex space-x-4 mb-4">
+                <button @click="timeRange = 'hour'" 
+                        :class="timeRange === 'hour' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'"
+                        class="px-4 py-2 rounded">
+                    Last Hour
+                </button>
+                <button @click="timeRange = 'day'"
+                        :class="timeRange === 'day' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'"
+                        class="px-4 py-2 rounded">
+                    Last Day
+                </button>
+                <button @click="timeRange = 'week'"
+                        :class="timeRange === 'week' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'"
+                        class="px-4 py-2 rounded">
+                    Last Week
+                </button>
+            </div>
+            <div class="h-96">
+                <canvas id="dataChart"></canvas>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-6">
+            <!-- Device Details & API Invocation -->
+            <div v-if="selectedDevice" class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Device Details</h2>
+                <div class="mb-6">
+                    <h3 class="font-medium mb-2">Device ID: ${selectedDevice.id}</h3>
+                    <p class="text-sm text-gray-500 mb-2">Status: ${selectedDevice.status}</p>
+                    <p class="text-sm text-gray-500">Last Seen: ${selectedDevice.last_seen || 'N/A'}</p>
+                </div>
+
+                <div class="border-t pt-4">
+                    <h3 class="font-medium mb-4">Invoke API</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Endpoint
+                            </label>
+                            <input v-model="apiEndpoint" 
+                                   class="w-full p-2 border rounded focus:ring-blue-500 focus:border-blue-500"
+                                   placeholder="/data">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">
+                                Request Data
+                            </label>
+                            <textarea v-model="apiRequest" 
+                                    class="w-full p-2 border rounded focus:ring-blue-500 focus:border-blue-500"
+                                    rows="4"
+                                    placeholder='{"include_diagnostics": true}'></textarea>
+                        </div>
+                        <button @click="invokeApi" 
+                                class="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                            Send Request
+                        </button>
+                    </div>
+                </div>
+
+                <div v-if="apiResponse" class="mt-6">
+                    <h3 class="font-medium mb-2">Response:</h3>
+                    <pre class="bg-gray-50 p-4 rounded text-sm overflow-x-auto">${apiResponse}</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        new Vue({
+            el: '#app',
+            delimiters: ['${', '}'],
+            data: {
+                devices: [],
+                selectedDevice: null,
+                apiEndpoint: '',
+                apiRequest: '',
+                apiResponse: null,
+                ws: null,
+                timeRange: 'hour',
+                chart: null,
+                publishedData: []
+            },
+            methods: {
+                async fetchDevices() {
+                    try {
+                        const response = await axios.get('/api/devices');
+                        this.devices = response.data;
+                    } catch (error) {
+                        console.error('Error fetching devices:', error);
+                    }
+                },
+                async fetchPublishedData() {
+                    try {
+                        const response = await axios.get('/api/published-data');
+                        this.publishedData = response.data;
+                        this.updateChart();
+                    } catch (error) {
+                        console.error('Error fetching published data:', error);
+                    }
+                },
+                updateChart() {
+                    if (!this.chart) {
+                        const ctx = document.getElementById('dataChart').getContext('2d');
+                        this.chart = new Chart(ctx, {
+                            type: 'line',
+                            data: {
+                                datasets: [{
+                                    label: 'Temperature (°C)',
+                                    data: [],
+                                    borderColor: 'rgb(59, 130, 246)',
+                                    tension: 0.1,
+                                    pointRadius: 4
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                scales: {
+                                    x: {
+                                        type: 'time',
+                                        time: {
+                                            unit: 'minute',
+                                            displayFormats: {
+                                                minute: 'HH:mm:ss'
+                                            }
+                                        },
+                                        title: {
+                                            display: true,
+                                            text: 'Time'
+                                        }
+                                    },
+                                    y: {
+                                        title: {
+                                            display: true,
+                                            text: 'Temperature (°C)'
+                                        },
+                                        beginAtZero: false
+                                    }
+                                },
+                                plugins: {
+                                    tooltip: {
+                                        callbacks: {
+                                            label: function(context) {
+                                                return `Temperature: ${context.parsed.y}°C`;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+
+                    const now = new Date();
+                    let timeLimit;
+                    switch (this.timeRange) {
+                        case 'hour':
+                            timeLimit = new Date(now - 60 * 60 * 1000);
+                            break;
+                        case 'day':
+                            timeLimit = new Date(now - 24 * 60 * 60 * 1000);
+                            break;
+                        case 'week':
+                            timeLimit = new Date(now - 7 * 24 * 60 * 60 * 1000);
+                            break;
+                    }
+
+                    const filteredData = this.publishedData
+                        .filter(d => d.type === 'temperature' && new Date(d.timestamp) > timeLimit)
+                        .map(d => ({
+                            x: new Date(d.timestamp),
+                            y: d.value
+                        }))
+                        .sort((a, b) => a.x - b.x);
+
+                    this.chart.data.datasets[0].data = filteredData;
+                    this.chart.update();
+                },
+                selectDevice(device) {
+                    this.selectedDevice = device;
+                    this.apiResponse = null;
+                    this.apiEndpoint = '';
+                    this.apiRequest = '';
+                    this.connectWebSocket(device.id);
+                },
+                async invokeApi() {
+                    try {
+                        let requestData = this.apiRequest;
+                        if (typeof requestData === 'string') {
+                            requestData = JSON.parse(requestData);
+                        }
+                        const response = await axios.post(`/api/invoke/${this.selectedDevice.id}`, {
+                            endpoint: this.apiEndpoint,
+                            data: requestData
+                        });
+                        this.apiResponse = JSON.stringify(response.data, null, 2);
+                    } catch (error) {
+                        this.apiResponse = JSON.stringify({
+                            error: error.response?.data?.detail || error.message
+                        }, null, 2);
+                    }
+                },
+                connectWebSocket(deviceId) {
+                    if (this.ws) {
+                        this.ws.close();
+                    }
+                    this.ws = new WebSocket(`ws://${window.location.host}/ws/${deviceId}`);
+                    this.ws.onmessage = (event) => {
+                        console.log('WebSocket message:', event.data);
+                        // Handle real-time updates here
+                    };
+                }
+            },
+            watch: {
+                timeRange() {
+                    this.updateChart();
+                }
+            },
+            mounted() {
+                this.fetchDevices();
+                this.fetchPublishedData();
+                // Poll for device updates every 5 seconds
+                setInterval(this.fetchDevices, 5000);
+                // Poll for published data updates every second
+                setInterval(this.fetchPublishedData, 1000);
+            }
+        });
+    </script>
+</body>
+</html> 

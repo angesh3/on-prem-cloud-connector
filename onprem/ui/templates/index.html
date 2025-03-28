@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Add toast notification library -->
+    <script src="https://cdn.jsdelivr.net/npm/toastify-js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <div class="bg-white shadow-lg rounded-lg p-6 mb-8">
+            <h1 class="text-2xl font-bold mb-4">Device Management Dashboard</h1>
+            
+            <!-- Device Status Card -->
+            <div class="bg-gray-50 p-4 rounded-lg mb-6">
+                <h2 class="text-lg font-semibold mb-3">Device Status</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-gray-600">Device ID:</p>
+                        <p class="font-medium">[[ deviceStatus.device_id ]]</p>
+                    </div>
+                    <div>
+                        <p class="text-gray-600">Registration Status:</p>
+                        <p class="font-medium">
+                            <span :class="deviceStatus.registered ? 'text-green-600' : 'text-red-600'">
+                                [[ deviceStatus.registered ? 'Registered' : 'Not Registered' ]]
+                            </span>
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-gray-600">Connection Status:</p>
+                        <p class="font-medium">
+                            <span :class="deviceStatus.connected ? 'text-green-600' : 'text-red-600'">
+                                [[ deviceStatus.connected ? 'Connected' : 'Disconnected' ]]
+                            </span>
+                        </p>
+                    </div>
+                    <div>
+                        <p class="text-gray-600">Last Heartbeat:</p>
+                        <p class="font-medium">[[ deviceStatus.last_heartbeat ]]</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Registration Form -->
+            <div v-if="!deviceStatus.registered" class="bg-gray-50 p-4 rounded-lg mb-6">
+                <h2 class="text-lg font-semibold mb-3">Device Registration</h2>
+                <form @submit.prevent="registerDevice" class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 mb-2">Device ID</label>
+                        <input type="text" v-model="form.device_id" 
+                               class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+                               required>
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-2">Metadata (JSON)</label>
+                        <textarea v-model="form.metadata" 
+                                  class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                  rows="4" required></textarea>
+                    </div>
+                    <button type="submit" 
+                            class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                        Register Device
+                    </button>
+                </form>
+            </div>
+
+            <!-- Data Publishing Section (visible when registered) -->
+            <div v-if="deviceStatus.registered" class="bg-gray-50 p-4 rounded-lg mb-6">
+                <h2 class="text-lg font-semibold mb-3">Publish Data</h2>
+                <form @submit.prevent="publishData" class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 mb-2">Data Type</label>
+                        <select v-model="publishForm.dataType" 
+                                class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400">
+                            <option value="temperature">Temperature Reading</option>
+                            <option value="status">Status Update</option>
+                            <option value="custom">Custom Data</option>
+                        </select>
+                    </div>
+                    <div v-if="publishForm.dataType === 'temperature'">
+                        <label class="block text-gray-700 mb-2">Temperature (°C)</label>
+                        <input type="number" v-model="publishForm.temperature" 
+                               class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+                               step="0.1">
+                    </div>
+                    <div v-if="publishForm.dataType === 'custom'">
+                        <label class="block text-gray-700 mb-2">Custom Data (JSON)</label>
+                        <textarea v-model="publishForm.customData" 
+                                  class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                  rows="4"></textarea>
+                    </div>
+                    <button type="submit" 
+                            class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400">
+                        Publish Data
+                    </button>
+                </form>
+
+                <!-- Published Data History -->
+                <div v-if="publishHistory.length > 0" class="mt-4">
+                    <h3 class="text-md font-semibold mb-2">Published Data History</h3>
+                    <div class="space-y-2">
+                        <div v-for="(item, index) in publishHistory" 
+                             :key="index"
+                             class="bg-white p-3 rounded border">
+                            <p class="text-sm text-gray-600">[[ item.timestamp ]]</p>
+                            <pre class="text-sm mt-1 overflow-x-auto">[[ JSON.stringify(item.data, null, 2) ]]</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Visualization Section -->
+            <div v-if="deviceStatus.registered && publishHistory.length > 0" class="bg-gray-50 p-4 rounded-lg mb-6">
+                <h2 class="text-lg font-semibold mb-3">Data Visualization</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Temperature Chart -->
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="text-md font-semibold mb-2">Temperature History</h3>
+                        <canvas id="temperatureChart"></canvas>
+                    </div>
+                    <!-- Data Type Distribution -->
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <h3 class="text-md font-semibold mb-2">Data Type Distribution</h3>
+                        <canvas id="dataTypeChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- API Invocation Section (visible when registered) -->
+            <div v-if="deviceStatus.registered" class="bg-gray-50 p-4 rounded-lg mb-6">
+                <h2 class="text-lg font-semibold mb-3">API Invocation</h2>
+                <form @submit.prevent="invokeApi" class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 mb-2">API Endpoint</label>
+                        <select v-model="apiForm.endpoint" 
+                                class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400">
+                            <option value="/api/status">Get Status</option>
+                            <option value="/api/diagnostics">Run Diagnostics</option>
+                            <option value="/api/custom">Custom Endpoint</option>
+                        </select>
+                    </div>
+                    <div v-if="apiForm.endpoint === '/api/custom'">
+                        <label class="block text-gray-700 mb-2">Custom Endpoint</label>
+                        <input type="text" v-model="apiForm.customEndpoint" 
+                               class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 mb-2">Request Payload (JSON)</label>
+                        <textarea v-model="apiForm.payload" 
+                                  class="w-full p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-400"
+                                  rows="4"></textarea>
+                    </div>
+                    <button type="submit" 
+                            class="bg-purple-500 text-white px-4 py-2 rounded hover:bg-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-400">
+                        Invoke API
+                    </button>
+                </form>
+
+                <!-- API Response History -->
+                <div v-if="apiHistory.length > 0" class="mt-4">
+                    <h3 class="text-md font-semibold mb-2">API Response History</h3>
+                    <div class="space-y-2">
+                        <div v-for="(item, index) in apiHistory" 
+                             :key="index"
+                             class="bg-white p-3 rounded border"
+                             :class="{'border-green-500': item.status === 200, 'border-red-500': item.status !== 200}">
+                            <div class="flex justify-between items-start">
+                                <p class="text-sm text-gray-600">[[ item.endpoint ]]</p>
+                                <span :class="item.status === 200 ? 'text-green-600' : 'text-red-600'"
+                                      class="text-sm font-medium">
+                                    Status: [[ item.status ]]
+                                </span>
+                            </div>
+                            <pre class="text-sm mt-1 overflow-x-auto">[[ JSON.stringify(item.response, null, 2) ]]</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Registration Info -->
+            <div v-if="deviceStatus.registered" class="bg-gray-50 p-4 rounded-lg">
+                <h2 class="text-lg font-semibold mb-3">Registration Information</h2>
+                <pre class="bg-gray-100 p-4 rounded overflow-x-auto">
+                    [[ JSON.stringify(deviceStatus.registration_info, null, 2) ]]
+                </pre>
+            </div>
+
+            <!-- Error Display Section -->
+            <div v-if="errors.length > 0" class="fixed bottom-4 right-4 w-96">
+                <div v-for="(error, index) in errors" 
+                     :key="index"
+                     class="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-2 rounded shadow-lg">
+                    <div class="flex justify-between">
+                        <p class="font-medium">[[ error.message ]]</p>
+                        <button @click="dismissError(index)" 
+                                class="text-red-700 hover:text-red-900">
+                            ×
+                        </button>
+                    </div>
+                    <p v-if="error.details" class="text-sm mt-1">[[ error.details ]]</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        new Vue({
+            el: '#app',
+            delimiters: ['[[', ']]'],
+            data: {
+                deviceStatus: {{ device_status|tojson }},
+                form: {
+                    device_id: '',
+                    metadata: '{\n  "url": "http://onprem-connector:8002",\n  "description": "On-premises device"\n}'
+                },
+                publishForm: {
+                    dataType: 'temperature',
+                    temperature: 20.0,
+                    customData: '{\n  "key": "value"\n}'
+                },
+                apiForm: {
+                    endpoint: '/api/status',
+                    customEndpoint: '',
+                    payload: '{\n  "include_diagnostics": true\n}'
+                },
+                publishHistory: [],
+                apiHistory: [],
+                errors: [],
+                charts: {
+                    temperature: null,
+                    dataType: null
+                }
+            },
+            methods: {
+                async registerDevice() {
+                    try {
+                        const formData = new FormData();
+                        formData.append('device_id', this.form.device_id);
+                        formData.append('metadata', this.form.metadata);
+
+                        const response = await axios.post('/register', formData);
+                        if (response.data.status === 'success') {
+                            this.deviceStatus = {
+                                ...this.deviceStatus,
+                                ...response.data.data,
+                                registered: true
+                            };
+                            alert('Device registered successfully!');
+                        }
+                    } catch (error) {
+                        alert('Error registering device: ' + error.response?.data?.detail || error.message);
+                    }
+                },
+                async publishData() {
+                    try {
+                        let data;
+                        if (this.publishForm.dataType === 'temperature') {
+                            data = {
+                                type: 'temperature',
+                                timestamp: new Date().toISOString(),
+                                value: parseFloat(this.publishForm.temperature),
+                                unit: 'celsius'
+                            };
+                        } else if (this.publishForm.dataType === 'custom') {
+                            try {
+                                data = JSON.parse(this.publishForm.customData);
+                            } catch (e) {
+                                this.showError(
+                                    'Invalid JSON data',
+                                    'Please check your custom data format'
+                                );
+                                return;
+                            }
+                        } else {
+                            data = {
+                                type: 'status',
+                                timestamp: new Date().toISOString(),
+                                status: 'active'
+                            };
+                        }
+
+                        console.log('Publishing data:', data);
+                        const response = await axios.post('/publish', data);
+                        console.log('Publish response:', response);
+
+                        if (response.data.status === 'success') {
+                            this.publishHistory.unshift({
+                                timestamp: new Date().toISOString(),
+                                data: data
+                            });
+                            Toastify({
+                                text: 'Data published successfully!',
+                                duration: 3000,
+                                close: true,
+                                gravity: "top",
+                                position: "right",
+                                backgroundColor: "#48BB78"
+                            }).showToast();
+                            await this.updateCharts();
+                        } else {
+                            Toastify({
+                                text: response.data.message || 'Unknown error occurred',
+                                duration: 3000,
+                                close: true,
+                                gravity: "top",
+                                position: "right",
+                                backgroundColor: "#EF4444"
+                            }).showToast();
+                        }
+                    } catch (error) {
+                        console.error('Publishing error:', error);
+                        Toastify({
+                            text: error.response?.data?.message || 
+                                 error.response?.data?.details ||
+                                 error.message ||
+                                 'Failed to publish data',
+                            duration: 3000,
+                            close: true,
+                            gravity: "top",
+                            position: "right",
+                            backgroundColor: "#EF4444"
+                        }).showToast();
+                    }
+                },
+                async invokeApi() {
+                    try {
+                        const endpoint = this.apiForm.endpoint === '/api/custom' 
+                            ? this.apiForm.customEndpoint 
+                            : this.apiForm.endpoint;
+                        const payload = JSON.parse(this.apiForm.payload);
+
+                        const response = await axios.post('/invoke-api', {
+                            endpoint: endpoint,
+                            payload: payload
+                        });
+
+                        this.apiHistory.unshift({
+                            endpoint: endpoint,
+                            status: response.status,
+                            response: response.data
+                        });
+                    } catch (error) {
+                        this.showError(
+                            'Error invoking API',
+                            error.response?.data?.detail || error.message
+                        );
+                    }
+                },
+                async updateStatus() {
+                    try {
+                        const response = await axios.get('/status');
+                        this.deviceStatus = response.data;
+                    } catch (error) {
+                        this.showError(
+                            'Error updating status',
+                            error.response?.data?.detail || error.message
+                        );
+                    }
+                },
+                showError(message, details = null) {
+                    this.errors.push({ message, details });
+                    // Auto-dismiss after 5 seconds
+                    setTimeout(() => {
+                        this.errors.shift();
+                    }, 5000);
+                },
+                dismissError(index) {
+                    this.errors.splice(index, 1);
+                },
+                showSuccess(message) {
+                    Toastify({
+                        text: message,
+                        duration: 3000,
+                        close: true,
+                        gravity: "top",
+                        position: "right",
+                        backgroundColor: "#48BB78"
+                    }).showToast();
+                },
+                updateCharts() {
+                    // Update temperature chart
+                    if (this.publishHistory.length > 0) {
+                        const tempData = this.publishHistory
+                            .filter(item => item.data.type === 'temperature')
+                            .slice(0, 10)
+                            .reverse();
+
+                        if (tempData.length > 0) {
+                            const ctx = document.getElementById('temperatureChart');
+                            if (this.charts.temperature) {
+                                this.charts.temperature.destroy();
+                            }
+                            this.charts.temperature = new Chart(ctx, {
+                                type: 'line',
+                                data: {
+                                    labels: tempData.map(item => {
+                                        const date = new Date(item.timestamp);
+                                        return date.toLocaleTimeString();
+                                    }),
+                                    datasets: [{
+                                        label: 'Temperature (°C)',
+                                        data: tempData.map(item => item.data.value),
+                                        borderColor: 'rgb(75, 192, 192)',
+                                        tension: 0.1
+                                    }]
+                                },
+                                options: {
+                                    responsive: true,
+                                    scales: {
+                                        y: {
+                                            beginAtZero: false
+                                        }
+                                    }
+                                }
+                            });
+                        }
+
+                        // Update data type distribution chart
+                        const dataTypes = {};
+                        this.publishHistory.forEach(item => {
+                            const type = item.data.type || 'custom';
+                            dataTypes[type] = (dataTypes[type] || 0) + 1;
+                        });
+
+                        const ctx2 = document.getElementById('dataTypeChart');
+                        if (this.charts.dataType) {
+                            this.charts.dataType.destroy();
+                        }
+                        this.charts.dataType = new Chart(ctx2, {
+                            type: 'doughnut',
+                            data: {
+                                labels: Object.keys(dataTypes),
+                                datasets: [{
+                                    data: Object.values(dataTypes),
+                                    backgroundColor: [
+                                        'rgb(75, 192, 192)',
+                                        'rgb(255, 205, 86)',
+                                        'rgb(54, 162, 235)'
+                                    ]
+                                }]
+                            },
+                            options: {
+                                responsive: true
+                            }
+                        });
+                    }
+                }
+            },
+            mounted() {
+                // Update status every 30 seconds
+                setInterval(this.updateStatus, 30000);
+                // Initial chart setup
+                this.$nextTick(() => {
+                    this.updateCharts();
+                });
+            },
+            watch: {
+                publishHistory: {
+                    deep: true,
+                    handler() {
+                        this.$nextTick(() => {
+                            this.updateCharts();
+                        });
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html> 
