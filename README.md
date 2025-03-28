@@ -195,6 +195,15 @@ View service metrics in Prometheus
 Create custom dashboards in Grafana
 View logs centrally through Loki in Grafana
 
+The onprem-connector is running successfully and has registered with the registry service. Now let's try the API invocation again:
+Go to http://localhost:8080
+Register your device if not already registered
+In the API invocation section:
+Enter /app/status as the endpoint
+Enter {"include_diagnostics": true} as the request data
+Click "Send Request"
+The request should now work and return the device status with diagnostics information. Let me know if you still encounter any issues!
+
 ## Troubleshooting
 
 1. **Certificate Issues**:
