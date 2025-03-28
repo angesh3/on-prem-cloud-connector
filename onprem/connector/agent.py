@@ -172,11 +172,16 @@ async def test_endpoint(request: Request):
         logger.error(f"Error in test endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/status")
+@app.api_route("/app/status", methods=["GET", "POST"])
 async def status_endpoint(request: Request):
     """Status endpoint that returns device status and diagnostics"""
     try:
-        data = await request.json()
+        # For GET requests, use default values
+        if request.method == "GET":
+            data = {"include_diagnostics": False}
+        else:
+            data = await request.json()
+        
         include_diagnostics = data.get("include_diagnostics", False)
         
         response = {

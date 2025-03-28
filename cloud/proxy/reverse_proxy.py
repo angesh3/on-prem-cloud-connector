@@ -77,7 +77,7 @@ async def verify_token(request: Request):
         logger.error(f"Error verifying token: {str(e)}")
         raise HTTPException(status_code=401, detail=str(e))
 
-@app.post("/forward/{device_id}/{endpoint:path}")
+@app.api_route("/forward/{device_id}/{endpoint:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def forward_request(
     device_id: str,
     endpoint: str,
